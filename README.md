@@ -51,3 +51,5 @@ If you want to clone and run this project locally in development mode, follow th
    ```bash
    git clone [https://github.com/NaborFranciscoIII/Inventory-Management-System.git](https://github.com/NaborFranciscoIII/Inventory-Management-System.git)
    cd Inventory-Management-System
+
+Project Installer: https://drive.google.com/drive/folders/1wLyrfANoG0KgmmFuQBcMcjnP4Zo9N3t0?usp=sharing
