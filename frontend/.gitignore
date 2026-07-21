@@ -1,0 +1,23 @@
+# Node & Frontend
+node_modules/
+dist/
+dist-ssr/
+.vite/
+npm-debug.log
+.env
+.env.*
+
+# Tauri / Rust
+# This ignores the large build binaries and caches
+src-tauri/target/
+src-tauri/gen/
+**/*.pdb
+
+# OS generated files
+.DS_Store
+Thumbs.db
+ehthumbs.db
+
+# VS Code / IDE
+.vscode/
+.idea/

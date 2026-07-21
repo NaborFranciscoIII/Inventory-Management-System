@@ -1,0 +1,41 @@
+Primary Objective: Transform the current Inventory Management UI into a Windows desktop application using a local-only architecture. The database must remain on the host computer and there will be no remote server hardware for testing.
+
+Phase 0: Desktop Architecture Decision
+- Choose the desktop runtime foundation for the project.
+- Recommended approach: Vite + React frontend wrapped with Tauri for Windows desktop packaging.
+- Use a local database on the host machine (recommended: SQLite for a simple, portable desktop deployment).
+- Keep the system offline-first and single-machine oriented unless a cloud backend is later requested.
+
+Phase 1: Frontend Cleanup, Setup and Reorganization
+- Confirm that the current frontend is stable and buildable.
+- Remove any remaining Figma-specific or test-only code that interferes with maintainability.
+- Replace the single large App.tsx implementation with modular page/component files for better organization.
+- Keep the existing UI design and navigation intact while preparing the application for backend integration.
+- Verify the app runs properly with mock data before replacing it with live backend data.
+
+Phase 2: Backend Framework Integration
+- Build the backend around the local host-only database model.
+- Implement authentication and role-based authorization.
+- Create the initial user roles: Admin, Manager, Sales, Warehouse, etc.
+- Build CRUD APIs for inventory entities such as products, categories, suppliers, customers, purchases, sales, inventory movements, and users.
+- Prepare a secure login flow with a test admin account for authorization testing.
+
+Phase 3: Frontend-to-Backend Connection
+- Replace the mock datasets with live API calls from the backend.
+- Bind the dashboard, products, inventory, suppliers, customers, purchases, sales, and reports pages to real persistent data.
+- Allow the admin to create additional users and adjust roles/permissions.
+- Ensure the create, read, update, and delete actions are reflected consistently across the UI.
+
+Phase 4: Desktop Application Packaging
+- Wrap the final web app in a desktop shell using Tauri or the chosen equivalent desktop framework.
+- Configure the packaging workflow so the app can be compiled to a Windows desktop application.
+- Confirm that the application launches and runs independently of any external server.
+- Prepare the app for distribution with a Windows installer or portable build.
+
+Phase 5: Validation, Hardening and Release Readiness
+- Test login, permissions, CRUD flows, and desktop startup on a Windows environment.
+- Validate data persistence on the host machine.
+- Remove unused dependencies and align the codebase for clean maintenance.
+- Finalize build and packaging documentation for the desktop release.
+
+Current Status: The frontend codebase is now buildable following a targeted HTML cleanup, and the next implementation milestones should focus on the local backend, role-based auth, and Tauri desktop packaging.

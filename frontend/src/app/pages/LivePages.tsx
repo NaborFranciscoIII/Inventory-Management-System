@@ -1,0 +1,146 @@
+import { useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { AlertTriangle, Boxes, CheckCircle, DollarSign, Package, Pencil, Plus, RefreshCw, ShoppingCart, Trash2, Users, X } from "lucide-react";
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { KpiCard, PageHeader, StatusBadge, TableContainer, Td, Th, fmtCurrency } from "../components/common";
+import { useLiveData, type LiveData, type Product } from "../data/liveData";
+import type { BackendEntity, RecordPayload } from "../services/backend";
+
+type Row = Record<string, unknown>;
+type Column = { label: string; render: (record: Row) => ReactNode; mono?: boolean };
+type Field = { key: string; label: string; type?: "text" | "email" | "password" | "number" | "date" | "select" | "textarea"; options?: Array<{ value: string; label: string }>; optional?: boolean };
+
+const statuses = ["Active", "Inactive"];
+const purchaseStatuses = ["Received", "Pending", "In Transit", "Cancelled"];
+const saleStatuses = ["Fulfilled", "Processing", "Shipped", "Refunded"];
+
+const row = (value: unknown) => value as Row;
+const string = (value: unknown) => value == null ? "" : String(value);
+const number = (value: unknown) => typeof value === "number" ? value : Number(value ?? 0);
+const today = () => new Date().toISOString().slice(0, 10);
+
+function ActionButton({ children, onClick, tone = "primary" }: { children: ReactNode; onClick: () => void; tone?: "primary" | "secondary" }) {
+  return <button onClick={onClick} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${tone === "primary" ? "bg-primary text-primary-foreground hover:opacity-90" : "border border-border bg-card hover:bg-muted/50"}`}>{children}</button>;
+}
+
+function LoadingState() {
+  return <div className="rounded-lg border border-border bg-card p-8 text-center text-sm text-muted-foreground">Loading local inventory data…</div>;
+}
+
+function PageError() {
+  const { error } = useLiveData();
+  return error ? <p role="alert" className="mb-4 rounded-md bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p> : null;
+}
+
+function fieldsFor(entity: BackendEntity, data: LiveData, roleNames: string[], editing: boolean): Field[] {
+  const productOptions = data.products.map((item) => ({ value: item.id, label: `${item.sku} — ${item.name}` }));
+  const categoryOptions = data.categories.map((item) => ({ value: item.id, label: item.name }));
+  const supplierOptions = data.suppliers.map((item) => ({ value: item.id, label: item.name }));
+  const customerOptions = data.customers.map((item) => ({ value: item.id, label: item.name }));
+  const statusField: Field = { key: "status", label: "Status", type: "select", options: statuses.map((value) => ({ value, label: value })) };
+
+  switch (entity) {
+    case "categories": return [{ key: "name", label: "Name" }, { key: "description", label: "Description", type: "textarea", optional: true }, statusField];
+    case "suppliers": return [{ key: "name", label: "Company name" }, { key: "contactName", label: "Contact name", optional: true }, { key: "email", label: "Email", type: "email", optional: true }, { key: "phone", label: "Phone", optional: true }, { key: "country", label: "Country", optional: true }, statusField];
+    case "customers": return [{ key: "name", label: "Customer name" }, { key: "email", label: "Email", type: "email", optional: true }, { key: "phone", label: "Phone", optional: true }, { key: "city", label: "City", optional: true }, { key: "tier", label: "Tier", optional: true }, statusField];
+    case "products": return [
+      { key: "sku", label: "SKU" }, { key: "name", label: "Product name" }, { key: "categoryId", label: "Category", type: "select", options: categoryOptions },
+      { key: "supplierId", label: "Supplier", type: "select", options: supplierOptions, optional: true }, { key: "price", label: "Unit price", type: "number" },
+      ...(editing ? [] : [{ key: "stock", label: "Opening stock", type: "number", optional: true } as Field]), { key: "reorderLevel", label: "Reorder level", type: "number" }, statusField,
+    ];
+    case "purchases": return [{ key: "productId", label: "Product", type: "select", options: productOptions }, { key: "supplierId", label: "Supplier", type: "select", options: supplierOptions }, { key: "quantity", label: "Quantity", type: "number" }, { key: "unitPrice", label: "Unit price", type: "number" }, { key: "purchaseDate", label: "Purchase date", type: "date" }, { key: "status", label: "Status", type: "select", options: purchaseStatuses.map((value) => ({ value, label: value })) }];
+    case "sales": return [{ key: "productId", label: "Product", type: "select", options: productOptions }, { key: "customerId", label: "Customer", type: "select", options: customerOptions }, { key: "quantity", label: "Quantity", type: "number" }, { key: "unitPrice", label: "Unit price", type: "number" }, { key: "saleDate", label: "Sale date", type: "date" }, { key: "status", label: "Status", type: "select", options: saleStatuses.map((value) => ({ value, label: value })) }];
+    case "inventory_movements": return [{ key: "productId", label: "Product", type: "select", options: productOptions }, { key: "movementType", label: "Movement type", type: "select", options: ["IN", "OUT", "ADJUSTMENT_IN", "ADJUSTMENT_OUT"].map((value) => ({ value, label: value.replace("_", " ") })) }, { key: "quantity", label: "Quantity", type: "number" }, { key: "reference", label: "Reference", optional: true }, { key: "notes", label: "Notes", type: "textarea", optional: true }];
+    case "users": return [{ key: "name", label: "Full name" }, { key: "email", label: "Email", type: "email" }, ...(editing ? [] : [{ key: "password", label: "Temporary password", type: "password" } as Field]), { key: "role", label: "Role", type: "select", options: roleNames.map((value) => ({ value, label: value })) }, statusField];
+  }
+}
+
+function RecordDialog({ entity, record, onClose }: { entity: BackendEntity; record?: Row; onClose: () => void }) {
+  const { data, roles, create, update } = useLiveData();
+  const editing = Boolean(record);
+  const fields = fieldsFor(entity, data, roles.map((role) => role.name), editing);
+  const [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries(fields.map((field) => [field.key, string(record?.[field.key] ?? (field.key.endsWith("Date") ? today() : field.key === "status" ? "Active" : ""))] )));
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const payload: RecordPayload = {};
+    for (const field of fields) {
+      const value = values[field.key]?.trim() ?? "";
+      if (!value && field.optional) continue;
+      if (!value) { setError(`${field.label} is required.`); return; }
+      payload[field.key] = field.type === "number" ? Number(value) : value;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      if (editing && record) await update(entity, string(record.id), payload);
+      else await create(entity, payload);
+      onClose();
+    } catch (reason) {
+      setError(String(reason).replace(/^Error:\s*/, ""));
+    } finally { setSaving(false); }
+  }
+
+  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 p-4">
+    <form onSubmit={submit} className="w-full max-w-xl max-h-[90vh] overflow-y-auto rounded-xl border border-border bg-card shadow-xl">
+      <div className="flex items-center justify-between border-b border-border px-5 py-4"><div><h2 className="text-base font-semibold">{editing ? "Edit" : "Add"} {entity.replace("_", " ")}</h2><p className="text-xs text-muted-foreground mt-0.5">Changes are saved to the local SQLite database.</p></div><button type="button" onClick={onClose} aria-label="Close" className="rounded p-1 hover:bg-muted"><X size={18} /></button></div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-5">
+        {fields.map((field) => <label key={field.key} className={field.type === "textarea" ? "sm:col-span-2" : ""}><span className="mb-1.5 block text-xs font-medium text-foreground">{field.label}{field.optional && <span className="text-muted-foreground"> (optional)</span>}</span>{field.type === "select" ? <select required={!field.optional} value={values[field.key] ?? ""} onChange={(event) => setValues({ ...values, [field.key]: event.target.value })} className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/30"><option value="">Select…</option>{field.options?.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select> : field.type === "textarea" ? <textarea value={values[field.key] ?? ""} onChange={(event) => setValues({ ...values, [field.key]: event.target.value })} className="min-h-20 w-full rounded-md border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/30" /> : <input required={!field.optional} type={field.type ?? "text"} min={field.type === "number" ? 0 : undefined} step={field.key.includes("Price") || field.key === "price" ? "0.01" : undefined} value={values[field.key] ?? ""} onChange={(event) => setValues({ ...values, [field.key]: event.target.value })} className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/30" />}</label>)}
+      </div>
+      {error && <p className="mx-5 mb-4 rounded bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
+      <div className="flex justify-end gap-2 border-t border-border px-5 py-4"><ActionButton tone="secondary" onClick={onClose}>Cancel</ActionButton><button disabled={saving} type="submit" className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground disabled:opacity-60">{saving ? "Saving…" : editing ? "Save changes" : "Create record"}</button></div>
+    </form>
+  </div>;
+}
+
+function CrudPage({ entity, title, sub, addLabel, records, columns }: { entity: BackendEntity; title: string; sub: string; addLabel: string; records: Row[]; columns: Column[] }) {
+  const { remove, isLoading, refresh } = useLiveData();
+  const [dialogRecord, setDialogRecord] = useState<Row | undefined>();
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [deleting, setDeleting] = useState("");
+  const filtered = records.filter((record) => Object.values(record).some((value) => string(value).toLowerCase().includes(query.toLowerCase())));
+
+  async function deleteRecord(record: Row) {
+    if (!window.confirm(`Delete ${string(record.name ?? record.id)}? This cannot be undone.`)) return;
+    setDeleting(string(record.id));
+    try { await remove(entity, string(record.id)); } catch { /* The shared error banner explains the failure. */ } finally { setDeleting(""); }
+  }
+
+  return <div>
+    <PageHeader title={title} sub={sub} action={<><div className="relative"><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={`Search ${title.toLowerCase()}…`} className="w-48 rounded-md border border-border bg-card px-3 py-1.5 text-xs outline-none focus:ring-1 focus:ring-primary" /></div><ActionButton tone="secondary" onClick={() => void refresh()}><RefreshCw size={13} /> Refresh</ActionButton><ActionButton onClick={() => { setDialogRecord(undefined); setDialogOpen(true); }}><Plus size={13} /> {addLabel}</ActionButton></>} />
+    <PageError />
+    {isLoading ? <LoadingState /> : <TableContainer><thead><tr>{columns.map((column) => <Th key={column.label} mono={column.mono}>{column.label}</Th>)}<Th>Actions</Th></tr></thead><tbody>{filtered.map((record) => <tr key={string(record.id)} className="hover:bg-muted/20 transition-colors">{columns.map((column) => <Td key={column.label} mono={column.mono}>{column.render(record)}</Td>)}<Td><div className="flex gap-1"><button onClick={() => { setDialogRecord(record); setDialogOpen(true); }} className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="Edit"><Pencil size={13} /></button><button disabled={deleting === string(record.id)} onClick={() => void deleteRecord(record)} className="rounded p-1 text-muted-foreground hover:bg-red-50 hover:text-red-600 disabled:opacity-50" aria-label="Delete"><Trash2 size={13} /></button></div></Td></tr>)}{filtered.length === 0 && <tr><Td colSpan={columns.length + 1}><span className="text-muted-foreground">No records found.</span></Td></tr>}</tbody></TableContainer>}
+    {dialogOpen && <RecordDialog key={`${entity}-${string(dialogRecord?.id ?? "new")}`} entity={entity} record={dialogRecord} onClose={() => setDialogOpen(false)} />}
+  </div>;
+}
+
+export function DashboardPage() {
+  const { data, isLoading, refresh } = useLiveData();
+  const revenue = data.sales.reduce((sum, sale) => sum + sale.total, 0);
+  const purchases = data.purchases.reduce((sum, purchase) => sum + purchase.total, 0);
+  const lowStock = data.products.filter((product) => product.stock <= product.reorderLevel).length;
+  const months = useMemo(() => {
+    const values = new Map<string, { month: string; sales: number; purchases: number }>();
+    for (const sale of data.sales) { const month = sale.saleDate.slice(0, 7); const entry = values.get(month) ?? { month, sales: 0, purchases: 0 }; entry.sales += sale.total; values.set(month, entry); }
+    for (const purchase of data.purchases) { const month = purchase.purchaseDate.slice(0, 7); const entry = values.get(month) ?? { month, sales: 0, purchases: 0 }; entry.purchases += purchase.total; values.set(month, entry); }
+    return [...values.values()].sort((a, b) => a.month.localeCompare(b.month));
+  }, [data.purchases, data.sales]);
+  if (isLoading) return <LoadingState />;
+  return <div className="space-y-6"><PageHeader title="Dashboard" sub="Live overview from your local database" action={<ActionButton tone="secondary" onClick={() => void refresh()}><RefreshCw size={13} /> Refresh</ActionButton>} /><PageError /><div className="grid grid-cols-2 lg:grid-cols-4 gap-4"><KpiCard title="Sales Revenue" value={fmtCurrency(revenue)} change="+0" icon={DollarSign} color="bg-emerald-500" /><KpiCard title="Sales Orders" value={String(data.sales.length)} change="+0" icon={ShoppingCart} color="bg-blue-500" /><KpiCard title="Products" value={String(data.products.length)} change="+0" icon={Boxes} color="bg-violet-500" /><KpiCard title="Low Stock" value={String(lowStock)} change={lowStock ? "-1" : "+0"} icon={AlertTriangle} color="bg-amber-500" /></div><div className="grid grid-cols-1 lg:grid-cols-3 gap-4"><div className="lg:col-span-2 rounded-lg border border-border bg-card p-4"><h2 className="mb-4 text-sm font-semibold">Sales and Purchases by Month</h2><ResponsiveContainer width="100%" height={250}><BarChart data={months}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="month" tick={{ fontSize: 11 }} /><YAxis tick={{ fontSize: 11 }} /><Tooltip formatter={(value: number) => fmtCurrency(value)} /><Bar dataKey="sales" fill="#10B981" name="Sales" radius={[4, 4, 0, 0]} /><Bar dataKey="purchases" fill="#3B82F6" name="Purchases" radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer></div><div className="rounded-lg border border-border bg-card p-4"><h2 className="mb-4 text-sm font-semibold">Recent inventory activity</h2><div className="space-y-3">{data.inventoryMovements.slice(0, 6).map((movement) => <div key={movement.id} className="border-b border-border pb-2 last:border-0"><div className="flex items-center justify-between"><span className="text-xs font-medium">{movement.product}</span><StatusBadge status={movement.movementType} /></div><p className="mt-1 text-[11px] text-muted-foreground">{movement.quantity} units · {movement.reference || "Manual adjustment"}</p></div>)}{data.inventoryMovements.length === 0 && <p className="text-xs text-muted-foreground">No movements recorded yet.</p>}</div></div></div><div className="rounded-lg border border-border bg-card p-4 text-sm text-muted-foreground">Current purchase value: <span className="font-mono font-semibold text-foreground">{fmtCurrency(purchases)}</span></div></div>;
+}
+
+export function ProductsPage() { const { data } = useLiveData(); return <CrudPage entity="products" title="Products" sub={`${data.products.length} live products`} addLabel="Add Product" records={data.products.map(row)} columns={[{ label: "SKU", mono: true, render: (item) => string(item.sku) }, { label: "Name", render: (item) => <span className="font-medium">{string(item.name)}</span> }, { label: "Category", render: (item) => string(item.category) }, { label: "Supplier", render: (item) => string(item.supplier) || "—" }, { label: "Price", mono: true, render: (item) => fmtCurrency(number(item.price)) }, { label: "Stock", mono: true, render: (item) => <span className={number(item.stock) <= number(item.reorderLevel) ? "font-semibold text-amber-600" : ""}>{number(item.stock)}</span> }, { label: "Reorder", mono: true, render: (item) => number(item.reorderLevel) }, { label: "Status", render: (item) => <StatusBadge status={string(item.status)} /> }]} />; }
+export function CategoriesPage() { const { data } = useLiveData(); return <CrudPage entity="categories" title="Categories" sub={`${data.categories.length} live categories`} addLabel="Add Category" records={data.categories.map(row)} columns={[{ label: "Name", render: (item) => <span className="font-medium">{string(item.name)}</span> }, { label: "Description", render: (item) => string(item.description) || "—" }, { label: "Products", mono: true, render: (item) => number(item.products) }, { label: "Stock Value", mono: true, render: (item) => fmtCurrency(number(item.value)) }, { label: "Status", render: (item) => <StatusBadge status={string(item.status)} /> }]} />; }
+export function SuppliersPage() { const { data } = useLiveData(); return <CrudPage entity="suppliers" title="Suppliers" sub={`${data.suppliers.length} live suppliers`} addLabel="Add Supplier" records={data.suppliers.map(row)} columns={[{ label: "Name", render: (item) => <span className="font-medium">{string(item.name)}</span> }, { label: "Contact", render: (item) => string(item.contactName) || string(item.email) || "—" }, { label: "Phone", mono: true, render: (item) => string(item.phone) || "—" }, { label: "Country", render: (item) => string(item.country) || "—" }, { label: "Products", mono: true, render: (item) => number(item.products) }, { label: "Status", render: (item) => <StatusBadge status={string(item.status)} /> }]} />; }
+export function CustomersPage() { const { data } = useLiveData(); return <CrudPage entity="customers" title="Customers" sub={`${data.customers.length} live customers`} addLabel="Add Customer" records={data.customers.map(row)} columns={[{ label: "Name", render: (item) => <span className="font-medium">{string(item.name)}</span> }, { label: "Email", render: (item) => string(item.email) || "—" }, { label: "Phone", mono: true, render: (item) => string(item.phone) || "—" }, { label: "City", render: (item) => string(item.city) || "—" }, { label: "Orders", mono: true, render: (item) => number(item.orders) }, { label: "Total Spent", mono: true, render: (item) => fmtCurrency(number(item.spent)) }, { label: "Status", render: (item) => <StatusBadge status={string(item.status)} /> }]} />; }
+export function PurchasesPage() { const { data } = useLiveData(); return <CrudPage entity="purchases" title="Purchases" sub={`${data.purchases.length} live purchase records`} addLabel="New Purchase" records={data.purchases.map(row)} columns={[{ label: "Reference", mono: true, render: (item) => string(item.id).slice(0, 8) }, { label: "Product", render: (item) => string(item.product) }, { label: "Supplier", render: (item) => string(item.supplier) }, { label: "Date", mono: true, render: (item) => string(item.purchaseDate) }, { label: "Quantity", mono: true, render: (item) => number(item.quantity) }, { label: "Total", mono: true, render: (item) => fmtCurrency(number(item.total)) }, { label: "Status", render: (item) => <StatusBadge status={string(item.status)} /> }]} />; }
+export function SalesPage() { const { data } = useLiveData(); return <CrudPage entity="sales" title="Sales" sub={`${data.sales.length} live sales records`} addLabel="New Sale" records={data.sales.map(row)} columns={[{ label: "Reference", mono: true, render: (item) => string(item.id).slice(0, 8) }, { label: "Product", render: (item) => string(item.product) }, { label: "Customer", render: (item) => string(item.customer) }, { label: "Date", mono: true, render: (item) => string(item.saleDate) }, { label: "Quantity", mono: true, render: (item) => number(item.quantity) }, { label: "Total", mono: true, render: (item) => fmtCurrency(number(item.total)) }, { label: "Status", render: (item) => <StatusBadge status={string(item.status)} /> }]} />; }
+
+function inventoryStatus(product: Product) { return product.stock === 0 ? "Out" : product.stock <= product.reorderLevel ? "Low" : "OK"; }
+export function InventoryPage() { const { data } = useLiveData(); const low = data.products.filter((product) => product.stock > 0 && product.stock <= product.reorderLevel).length; const out = data.products.filter((product) => product.stock === 0).length; return <div className="space-y-5"><PageHeader title="Inventory" sub="Live stock levels and movement history" /><PageError /><div className="grid grid-cols-3 gap-4"><div className="rounded-lg border border-border bg-card p-3"><div className="text-lg font-semibold">{data.products.length - low - out}</div><div className="text-[11px] text-muted-foreground">In stock</div></div><div className="rounded-lg border border-amber-200 bg-card p-3"><div className="text-lg font-semibold">{low}</div><div className="text-[11px] text-muted-foreground">Low stock</div></div><div className="rounded-lg border border-red-200 bg-card p-3"><div className="text-lg font-semibold">{out}</div><div className="text-[11px] text-muted-foreground">Out of stock</div></div></div><CrudPage entity="inventory_movements" title="Inventory Movements" sub="Use adjustments to change current stock" addLabel="Add Adjustment" records={data.inventoryMovements.map(row)} columns={[{ label: "Product", render: (item) => string(item.product) }, { label: "Type", render: (item) => <StatusBadge status={string(item.movementType)} /> }, { label: "Quantity", mono: true, render: (item) => number(item.quantity) }, { label: "Reference", render: (item) => string(item.reference) || "—" }, { label: "Notes", render: (item) => string(item.notes) || "—" }, { label: "Created", mono: true, render: (item) => string(item.createdAt).slice(0, 10) }]} /><div><h2 className="mb-3 text-sm font-semibold">Current Stock</h2><TableContainer><thead><tr><Th>SKU</Th><Th>Product</Th><Th mono>On Hand</Th><Th mono>Reorder At</Th><Th>Status</Th></tr></thead><tbody>{data.products.map((product) => <tr key={product.id}><Td mono>{product.sku}</Td><Td>{product.name}</Td><Td mono>{product.stock}</Td><Td mono>{product.reorderLevel}</Td><Td><StatusBadge status={inventoryStatus(product)} /></Td></tr>)}</tbody></TableContainer></div></div>; }
+
+export function ReportsPage() { const { data } = useLiveData(); const salesByCustomer = data.sales.reduce<Record<string, number>>((result, sale) => ({ ...result, [sale.customer]: (result[sale.customer] ?? 0) + sale.total }), {}); const topCustomers = Object.entries(salesByCustomer).sort((a, b) => b[1] - a[1]).slice(0, 6); return <div className="space-y-5"><PageHeader title="Reports" sub="Live local-database analytics" /><PageError /><div className="grid grid-cols-1 lg:grid-cols-2 gap-4"><div className="rounded-lg border border-border bg-card p-4"><h2 className="mb-4 text-sm font-semibold">Top Customers by Sales</h2>{topCustomers.length ? <div className="space-y-3">{topCustomers.map(([customer, total]) => <div key={customer} className="flex justify-between border-b border-border pb-2 text-sm"><span>{customer}</span><span className="font-mono">{fmtCurrency(total)}</span></div>)}</div> : <p className="text-sm text-muted-foreground">No sales have been recorded.</p>}</div><div className="rounded-lg border border-border bg-card p-4"><h2 className="mb-4 text-sm font-semibold">Reorder Report</h2>{data.products.filter((product) => product.stock <= product.reorderLevel).map((product) => <div key={product.id} className="flex justify-between border-b border-border pb-2 mb-2 text-sm"><span>{product.name}</span><span className="font-mono text-amber-600">{product.stock} / {product.reorderLevel}</span></div>)}{!data.products.some((product) => product.stock <= product.reorderLevel) && <p className="text-sm text-muted-foreground">No products currently need reordering.</p>}</div></div></div>; }
+export function UserManagementPage() { const { data } = useLiveData(); return <CrudPage entity="users" title="Users" sub={`${data.users.length} local accounts`} addLabel="Add User" records={data.users.map(row)} columns={[{ label: "Name", render: (item) => <span className="font-medium">{string(item.name)}</span> }, { label: "Email", render: (item) => string(item.email) }, { label: "Role", render: (item) => <StatusBadge status={string(item.role)} /> }, { label: "Last Login", mono: true, render: (item) => string(item.lastLogin).slice(0, 16) || "Never" }, { label: "Status", render: (item) => <StatusBadge status={string(item.status)} /> }]} />; }
+export function SettingsPage() { return <div><PageHeader title="Settings" sub="Application settings will be persisted in a later settings module." /><div className="rounded-lg border border-border bg-card p-5 text-sm text-muted-foreground">Authentication, inventory, purchasing, sales, and user data are now stored locally. This screen remains presentation-only because settings persistence is outside the current requirements.</div></div>; }

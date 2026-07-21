@@ -1,0 +1,21 @@
+//Allow PowerShell scripts (Run once per PC)
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process
+
+//Instead of opening two windows and manually starting Vite and Cargo, you can let Tauri handle both simultaneously.
+npm run tauri dev
+
+//Open PowerShell window 1:
+cd "D:\Code Projects\For Portfolio\Inventory Management App\frontend"
+npm.cmd run dev -- --host 127.0.0.1
+
+//Open PowerShell window 2:
+cd "D:\Code Projects\For Portfolio\Inventory Management App\frontend\src-tauri"
+cargo run
+
+//Admin Login Credentials
+Email: admin@stockwise.local
+Password: Admin123!
+
+
+D:\Code Projects\For Portfolio\Inventory Management App\frontend\src-tauri\target\release\bundle\msi\Stockwise-alpha-ver-0.1.0_0.1.0_x64_en-US.msi
+D:\Code Projects\For Portfolio\Inventory Management App\frontend\src-tauri\target\release\bundle\nsis\Stockwise-alpha-ver-0.1.0_0.1.0_x64-setup.exe

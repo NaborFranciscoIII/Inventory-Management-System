@@ -1,0 +1,9 @@
+This is an Inventory Management System with UI made by Figma including the code, but only limited to frontend side. CRUD Operations are not possible.
+
+This project has 11 core functions. Additional modules can be added upon client/end-users' request.
+
+The application can create, modify, and erase accounts and authorizations, but it doesn't have a Login Page yet.
+
+The frontend is mostly TypeScript, with a little bit CSS for the designs. CSS files can be found on frontend/src/styles/
+
+Additional UI elements can be found at frontend/src/app/components/ui
