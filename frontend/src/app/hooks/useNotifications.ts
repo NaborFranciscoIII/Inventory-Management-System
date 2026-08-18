@@ -1,5 +1,5 @@
-import { useMemo } from 'react';
-import { useLiveData } from '../data/liveData'; // Ensure this points to your SQLite context
+import { useMemo, useState, useEffect } from 'react';
+import { useLiveData } from '../data/liveData'; 
 import { useSettings } from '../contexts/SettingsContext';
 
 export type NotificationAlert = {
@@ -10,25 +10,49 @@ export type NotificationAlert = {
   timestamp: string;
 };
 
+// 🛑 IMPORTANT: Update these constants before deploying!
+const CURRENT_VERSION = "v1.0.0"; 
+const GITHUB_REPO = "your-github-username/your-repository-name"; // e.g., "johndoe/inventory-app"
+
 export function useNotifications() {
   const { data } = useLiveData();
   const { settings } = useSettings();
+  
+  // State to hold the fetched GitHub update alert
+  const [updateAlert, setUpdateAlert] = useState<NotificationAlert | null>(null);
+
+  // Background fetch to GitHub API for latest release
+  useEffect(() => {
+    // Only fetch if a repo is set
+    if (GITHUB_REPO.includes("your-github-username")) return;
+
+    fetch(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`)
+      .then((res) => res.json())
+      .then((githubData) => {
+        // If the latest tag (e.g., v0.2.0) doesn't match our current version, trigger an alert!
+        if (githubData.tag_name && githubData.tag_name !== CURRENT_VERSION) {
+          setUpdateAlert({
+            id: 'sys-update-gh',
+            title: 'New Update Available 🚀',
+            message: `Version ${githubData.tag_name} is ready to download! You are currently running ${CURRENT_VERSION}. Check GitHub for release notes.`,
+            type: 'info',
+            timestamp: new Date().toISOString(),
+          });
+        }
+      })
+      .catch((err) => console.log("Silent fail on update check (offline or rate limited):", err));
+  }, []);
 
   const notifications = useMemo(() => {
     const alerts: NotificationAlert[] = [];
 
-    // 1. System Updates (Mock logic for your Application Updates requirement)
-    alerts.push({
-      id: 'sys-update-01',
-      title: 'New Version Available',
-      message: 'Version 0.2.0 is ready to install. Check settings for details.',
-      type: 'info',
-      timestamp: new Date().toISOString(),
-    });
+    // 1. Inject the GitHub Update Alert if it exists
+    if (updateAlert) {
+      alerts.push(updateAlert);
+    }
 
     // 2. Dynamic Inventory Scanning
     data.products.forEach((product) => {
-      // Calculate the threshold buffer (e.g., 20% above the reorder point)
       const warningLevel = product.reorderLevel * (1 + (settings.lowStockThreshold / 100));
 
       if (product.stock <= product.reorderLevel) {
@@ -52,7 +76,7 @@ export function useNotifications() {
 
     // Sort newest to oldest
     return alerts.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-  }, [data.products, settings.lowStockThreshold]);
+  }, [data.products, settings.lowStockThreshold, updateAlert]);
 
   const unreadCount = notifications.length;
 
