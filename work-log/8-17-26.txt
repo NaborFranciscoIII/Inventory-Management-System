@@ -1,0 +1,6 @@
+Finished Modules
+
+1. Rebuilding Reports Page to its original design.
+2. Creating the Notification Logic and building the universal currency setting using formatCurrency Funtion
+3. Rebuilt the Settings Page with functions on the General sections. Notifications, Security, and Integrations sections are empty as of now.
+4. Conversion currency is now working, though I would call it "switching" rather than a "conversion".

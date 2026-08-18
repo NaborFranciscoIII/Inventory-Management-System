@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Bell, Boxes, LogOut, Menu, Search } from "lucide-react";
+import { useEffect, useState, ReactNode } from "react";
+import { Bell, Boxes, LogOut, Menu, Search, ShieldAlert, ArrowLeft } from "lucide-react";
 import { navItems } from "./data/mockData";
 import { LoginPage } from "./pages/LoginPage";
 import { getCurrentUser, logout, sessionStore, type AuthSession } from "./services/backend";
@@ -17,35 +17,120 @@ import {
   UserManagementPage,
 } from "./pages/LivePages";
 import { LiveDataProvider } from "./data/liveData";
+import { SettingsProvider } from "./contexts/SettingsContext";
+import { NotificationsWidget } from './components/NotificationsWidget';
+
+// ─── Security Components ──────────────────────────────────────────────────
+
+function UnauthorizedPage({ onReturn }: { onReturn: () => void }) {
+  return (
+    <div className="flex flex-col items-center justify-center min-h-[70vh] text-center px-4 animate-in fade-in zoom-in-95 duration-300">
+      <div className="w-20 h-20 bg-red-100 dark:bg-red-500/10 rounded-full flex items-center justify-center mb-6 shadow-sm border border-red-200 dark:border-red-500/20">
+        <ShieldAlert className="w-10 h-10 text-red-600 dark:text-red-500" />
+      </div>
+      <h1 className="text-2xl font-bold text-foreground tracking-tight mb-2">
+        Access Restricted
+      </h1>
+      <p className="text-sm text-muted-foreground max-w-md mb-8 leading-relaxed">
+        Your current account role does not have the necessary permissions to view this module. If you believe you need access, please contact your system administrator.
+      </p>
+      <button
+        onClick={onReturn}
+        className="flex items-center gap-2 px-5 py-2.5 bg-primary text-primary-foreground font-medium text-sm rounded-lg hover:bg-primary/90 transition-colors shadow-sm"
+      >
+        <ArrowLeft size={16} />
+        Return to Dashboard
+      </button>
+    </div>
+  );
+}
+
+function ProtectedRoute({ 
+  children, 
+  allowedRoles, 
+  userRole, 
+  onReturn 
+}: { 
+  children: ReactNode; 
+  allowedRoles: string[]; 
+  userRole: string; 
+  onReturn: () => void;
+}) {
+  if (!allowedRoles.includes(userRole)) {
+    return <UnauthorizedPage onReturn={onReturn} />;
+  }
+  return <>{children}</>;
+}
+
+// ─── Main Application Shell ───────────────────────────────────────────────
 
 function ApplicationShell({ session, onLogout }: { session: AuthSession; onLogout: () => void }) {
   const [active, setActive] = useState("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
-  const renderPage = () => {
+  const userRole = session.user.role;
+
+const renderPage = () => {
     switch (active) {
+      // 🟢 Universal Routes (Accessible to Everyone)
       case "dashboard":
         return <DashboardPage />;
       case "products":
         return <ProductsPage />;
       case "categories":
         return <CategoriesPage />;
-      case "suppliers":
-        return <SuppliersPage />;
-      case "customers":
-        return <CustomersPage />;
-      case "purchases":
-        return <PurchasesPage />;
-      case "sales":
-        return <SalesPage />;
       case "inventory":
         return <InventoryPage />;
+      
+      // 📦 Warehouse & Management Routes (Blocked for Sales)
+      case "suppliers":
+        return (
+          <ProtectedRoute allowedRoles={["Admin", "Manager", "Warehouse"]} userRole={userRole} onReturn={() => setActive("dashboard")}>
+            <SuppliersPage />
+          </ProtectedRoute>
+        );
+      case "purchases":
+        return (
+          <ProtectedRoute allowedRoles={["Admin", "Manager", "Warehouse"]} userRole={userRole} onReturn={() => setActive("dashboard")}>
+            <PurchasesPage />
+          </ProtectedRoute>
+        );
+
+      // 🛒 Sales & Management Routes (Blocked for Warehouse)
+      case "customers":
+        return (
+          <ProtectedRoute allowedRoles={["Admin", "Manager", "Sales"]} userRole={userRole} onReturn={() => setActive("dashboard")}>
+            <CustomersPage />
+          </ProtectedRoute>
+        );
+      case "sales":
+        return (
+          <ProtectedRoute allowedRoles={["Admin", "Manager", "Sales"]} userRole={userRole} onReturn={() => setActive("dashboard")}>
+            <SalesPage />
+          </ProtectedRoute>
+        );
+
+      // 🔒 High-Level Restricted Routes (Management Only)
       case "reports":
-        return <ReportsPage />;
-      case "users":
-        return <UserManagementPage />;
+        return (
+          <ProtectedRoute allowedRoles={["Admin", "Manager"]} userRole={userRole} onReturn={() => setActive("dashboard")}>
+            <ReportsPage />
+          </ProtectedRoute>
+        );
       case "settings":
-        return <SettingsPage />;
+        return (
+          <ProtectedRoute allowedRoles={["Admin", "Manager"]} userRole={userRole} onReturn={() => setActive("dashboard")}>
+            <SettingsPage />
+          </ProtectedRoute>
+        );
+        
+      // 🔐 Admin Only
+      case "users":
+        return (
+          <ProtectedRoute allowedRoles={["Admin"]} userRole={userRole} onReturn={() => setActive("dashboard")}>
+            <UserManagementPage />
+          </ProtectedRoute>
+        );
       default:
         return <DashboardPage />;
     }
@@ -62,7 +147,12 @@ function ApplicationShell({ session, onLogout }: { session: AuthSession; onLogou
         </div>
 
         <nav className="flex-1 py-3 overflow-y-auto">
-          {navItems.filter((item) => session.user.role === "Admin" || item.id !== "users").map((item) => {
+          {navItems.map((item) => {
+            // Hide Users tab entirely if not an Admin
+            if (item.id === "users" && userRole !== "Admin") return null;
+            // Optionally hide Settings/Reports for lower roles, but leaving them visible 
+            // allows the UnauthorizedPage to do its job gracefully.
+            
             const Icon = item.icon;
             const isActive = active === item.id;
             return (
@@ -109,10 +199,7 @@ function ApplicationShell({ session, onLogout }: { session: AuthSession; onLogou
           </div>
           <div className="flex-1" />
           <div className="flex items-center gap-2">
-            <button className="relative p-1.5 rounded-md hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors">
-              <Bell size={15} />
-              <span className="absolute top-1 right-1 w-1.5 h-1.5 bg-red-500 rounded-full" />
-            </button>
+              <NotificationsWidget />
             <div title={`${session.user.name} (${session.user.role})`} className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center text-[10px] font-bold text-primary cursor-default">{initials(session.user.name)}</div>
           </div>
         </header>
@@ -164,8 +251,10 @@ export default function App() {
   }
 
   return (
-    <LiveDataProvider session={session}>
-      <ApplicationShell session={session} onLogout={handleLogout} />
-    </LiveDataProvider>
+    <SettingsProvider>
+      <LiveDataProvider session={session}>
+        <ApplicationShell session={session} onLogout={handleLogout} />
+      </LiveDataProvider>
+    </SettingsProvider>
   );
 }

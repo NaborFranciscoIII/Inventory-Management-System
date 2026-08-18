@@ -1,0 +1,5 @@
+//1. Support for all currencies
+Add settings to switch currencies. It will be alphabetically arranged on dropdown selection.
+
+//2. Build Notificaitons
+Create notification feature (which already exist design wise) for updates, new available versions, inventory reports, new stocks, warnings, etc.

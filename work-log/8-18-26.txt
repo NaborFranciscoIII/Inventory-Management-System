@@ -1,0 +1,2 @@
+Finished Modules
+1. Created the visual interface for the pop-up notification
